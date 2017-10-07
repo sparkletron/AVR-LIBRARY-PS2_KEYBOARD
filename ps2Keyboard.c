@@ -4,7 +4,7 @@
  *  Created on: September 28, 2017
  *      Author: John Convertino
  *			email: electrobs@gmail.com
- *		
+ *
     Copyright (C) 2017 John Convertino
 
     This program is free software; you can redistribute it and/or modify
@@ -54,7 +54,7 @@ uint8_t convertToRaw(uint16_t ps2data);
 void sendPS2ledsCMD();
 //set internal LED tracking and send LED state to keyboard.
 void setPS2leds(uint8_t caps, uint8_t num, uint8_t scroll);
-//generate odd parity 
+//generate odd parity
 uint8_t oddParityGen(uint8_t data);
 //convert 8 bit data into a 11 bit packet
 uint16_t dataToPacket(uint8_t data);
@@ -75,6 +75,11 @@ void extractData(uint16_t ps2data);
 
 void initPS2keyboard(t_PS2userRecvCallback PS2recvCallback, volatile uint8_t *p_port, uint8_t clkPin, uint8_t dataPin)
 {
+	uint8_t tmpSREG = 0;
+
+	tmpSREG = SREG;
+	cli();
+
 	if(p_port == NULL) return;
 
 	if(PS2recvCallback == NULL) return;
@@ -109,18 +114,25 @@ void initPS2keyboard(t_PS2userRecvCallback PS2recvCallback, volatile uint8_t *p_
 		PCMSK2 |= 1 << e_ps2keyboard.clkPin;
 	}
 
+	SREG = tmpSREG;
+
 	sei();
 
 	//initialize keyboard using PC init method
 	resetPS2keyboard();
 
 	sendPS2ledsCMD();
-	
+
 	setPS2leds(0, 0 ,0);
 }
 
 char defineToChar(uint8_t ps2data)
 {
+	uint8_t tmpSREG = 0;
+
+	tmpSREG = SREG;
+	cli();
+
 	int index = 0;
 
 	for(index = 0; e_set2scanCodes[index].defineCode != 0; index++)
@@ -129,13 +141,17 @@ char defineToChar(uint8_t ps2data)
 		{
 			if((e_set2scanCodes[index].ascii >= 'a') && (e_set2scanCodes[index].ascii <= 'z'))
 			{
+				SREG = tmpSREG;
+
 				return (getCapsLockState() ? e_set2scanCodes[index].ascii - 32 : e_set2scanCodes[index].ascii);
 			}
 
+			SREG = tmpSREG;
 			return e_set2scanCodes[index].ascii;
 		}
 	}
 
+	SREG = tmpSREG;
 	return e_set2scanCodes[index].ascii;
 }
 
@@ -143,23 +159,23 @@ void updatePS2leds()
 {
 	static uint8_t prevLEDS = 0;
 	uint8_t tmpSREG = 0;
-	
+
 	tmpSREG = SREG;
 	cli();
-	
+
 	if(prevLEDS != e_ps2keyboard.leds.packet)
 	{
 		SREG = tmpSREG;
-		
+
 		sendPS2ledsCMD();
-				
+
 		setPS2leds(getCapsLockState(), getNumLockState(), getScrollLockState());
 
 		cli();
 	}
-	
+
 	prevLEDS = e_ps2keyboard.leds.packet;
-	
+
 	SREG = tmpSREG;
 }
 
@@ -191,6 +207,7 @@ uint8_t getScrollLockState()
 void resendPS2lastByte()
 {
 	uint16_t tempConv = 0;
+	uint8_t tmpSREG = 0;
 
 	//wait till we are done sending last command.
 	while(e_ps2keyboard.modeFlag == SEND_MODE);
@@ -218,7 +235,7 @@ void resetPS2keyboard()
 	copyPacketToSendBuf(tempConv);
 
 	startTransmit();
-	
+
 	waitingForCallback();
 }
 
@@ -238,7 +255,7 @@ void disablePS2keyboard()
 	copyPacketToSendBuf(tempConv);
 
 	startTransmit();
-	
+
 	waitingForCallback();
 }
 
@@ -258,7 +275,7 @@ void enablePS2keyaboard()
 	copyPacketToSendBuf(tempConv);
 
 	startTransmit();
-	
+
 	waitingForCallback();
 }
 
@@ -278,7 +295,7 @@ void setPS2default()
 	copyPacketToSendBuf(tempConv);
 
 	startTransmit();
-	
+
 	waitingForCallback();
 }
 
@@ -298,7 +315,7 @@ void sendPS2typmaticRateDelayCMD()
 	copyPacketToSendBuf(tempConv);
 
 	startTransmit();
-	
+
 	waitingForCallback();
 }
 
@@ -322,7 +339,7 @@ void setPS2typmaticRateDelay(uint8_t delay, uint8_t rate)
 	copyPacketToSendBuf(tempConv);
 
 	startTransmit();
-	
+
 	waitingForCallback();
 }
 
@@ -338,7 +355,7 @@ void sendPS2readIDcmd()
 	e_ps2keyboard.recvCallback = &getID;
 
 	e_ps2keyboard.idRecv = ID_NRECV;
-	
+
 	e_ps2keyboard.callbackState = waiting;
 
 	tempConv = dataToPacket(CMD_READ_ID);
@@ -346,7 +363,7 @@ void sendPS2readIDcmd()
 	copyPacketToSendBuf(tempConv);
 
 	startTransmit();
-	
+
 	waitingForCallback();
 }
 
@@ -354,7 +371,7 @@ void sendPS2readIDcmd()
 enum callbackStates waitingForCallback()
 {
 	while(e_ps2keyboard.callbackState == waiting);
-	
+
 	return e_ps2keyboard.callbackState;
 }
 
@@ -394,7 +411,7 @@ uint8_t convertToDefine(uint8_t ps2data)
 	}
 
 	e_ps2keyboard.keybreak = NKEYBREAK;
-	
+
 	return 0;
 }
 
@@ -405,7 +422,7 @@ uint8_t convertToRaw(uint16_t ps2data)
 	tmpParity = oddParityGen((uint8_t)(ps2data >> DATA_BIT0_POS) & 0xFF);
 
 	if(tmpParity != (uint8_t)((ps2data >> PARITY_BIT_POS) & 0x0001)) return 0;
-	
+
 	return (uint8_t)((ps2data >> DATA_BIT0_POS) & 0x00FF);
 }
 
@@ -425,7 +442,7 @@ void sendPS2ledsCMD()
 	copyPacketToSendBuf(tempConv);
 
 	startTransmit();
-	
+
 	waitingForCallback();
 }
 
@@ -451,7 +468,7 @@ void setPS2leds(uint8_t caps, uint8_t num, uint8_t scroll)
 	copyPacketToSendBuf(tempConv);
 
 	startTransmit();
-	
+
 	waitingForCallback();
 }
 
@@ -497,7 +514,7 @@ void startTransmit()
 {
 	uint8_t tmpSREG = SREG;
 	cli();
-	
+
 	e_ps2keyboard.modeFlag = SEND_MODE;
 
 	e_ps2keyboard.sendIndex = 0;
@@ -515,7 +532,7 @@ void startTransmit()
 	*(e_ps2keyboard.p_port - 1) &= ~(1 << e_ps2keyboard.clkPin);
 
 	e_ps2keyboard.sendIndex++;
-	
+
 	SREG = tmpSREG;
 }
 
@@ -601,11 +618,11 @@ void extractData(uint16_t ps2data)
 {
 	uint8_t rawPS2data = 0;
 	uint8_t definePS2data = 0;
-	
+
 	rawPS2data = convertToRaw(ps2data);
-	
+
 	definePS2data = convertToDefine(rawPS2data);
-	
+
 	switch(definePS2data)
 	{
 		case KEYCODE_CAPS:
