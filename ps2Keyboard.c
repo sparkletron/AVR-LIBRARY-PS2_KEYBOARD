@@ -207,7 +207,6 @@ uint8_t getScrollLockState()
 void resendPS2lastByte()
 {
 	uint16_t tempConv = 0;
-	uint8_t tmpSREG = 0;
 
 	//wait till we are done sending last command.
 	while(e_ps2keyboard.modeFlag == SEND_MODE);
