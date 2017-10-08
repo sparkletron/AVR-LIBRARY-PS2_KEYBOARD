@@ -4,7 +4,7 @@
  *  Created on: September 28, 2017
  *      Author: John Convertino
  *			email: electrobs@gmail.com
- *		
+ *
     Copyright (C) 2017 John Convertino
 
     This program is free software; you can redistribute it and/or modify
@@ -34,8 +34,12 @@ typedef void (*t_PS2userRecvCallback)(uint8_t recvBuffer);
 enum callbackStates {done, waiting, error, resend, noack};
 
 //bit defines
-#define MAX_BIT_COUNT   64
+#define MAX_BIT_COUNT    64
 #define BIT_COUNT        8
+#define MAX_REPEAT_RATE  0x1F
+#define MAX_DELAY        0x03
+#define DEFAULT_RATE     0x0B
+#define DEFAULT_DELAY    0x01
 
 //bool values
 #define RECV_MODE   0
@@ -124,6 +128,6 @@ enum callbackStates {done, waiting, error, resend, noack};
 #define KEYCODE_KP6    157
 #define KEYCODE_KP7    158
 #define KEYCODE_KP8    159
-#define KEYCODE_KP9    160 
+#define KEYCODE_KP9    160
 
 #endif

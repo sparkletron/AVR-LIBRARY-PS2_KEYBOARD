@@ -329,9 +329,9 @@ void setPS2typmaticRateDelay(uint8_t delay, uint8_t rate)
 
 	e_ps2keyboard.callbackState = waiting;
 
-	e_ps2keyboard.typematic.param.rate = rate;
+	e_ps2keyboard.typematic.param.rate = (rate <= MAX_REPEAT_RATE ? rate : DEFAULT_RATE);
 
-	e_ps2keyboard.typematic.param.delay = delay;
+	e_ps2keyboard.typematic.param.delay = (delay <= MAX_DELAY ? delay : DEFAULT_DELAY);
 
 	tempConv = dataToPacket(e_ps2keyboard.typematic.packet);
 

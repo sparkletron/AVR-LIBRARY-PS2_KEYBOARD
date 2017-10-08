@@ -1,9 +1,9 @@
 /**
  * \brief Driver to interface with PS2 based keyboard
  *
- * \author John Convertino (electrobs@gmail.com) 
+ * \author John Convertino (electrobs@gmail.com)
  * \date   8/28/2017
- * 
+ *
     Copyright (C) 2017 John Convertino
 
     This program is free software; you can redistribute it and/or modify
@@ -19,7 +19,7 @@
     You should have received a copy of the GNU General Public License along
     with this program; if not, write to the Free Software Foundation, Inc.,
     51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
- * 
+ *
  * \version 1.0
  */
 
@@ -39,7 +39,7 @@
 
 /**
  * \brief initialize PS2 keyboard
- * 
+ *
  * \param p_port Gets the address of a port to be used for the clk and data pin.
  * \param clkPin Define which pin used for the clock
  * \param dataPin Define the pin used for data.
@@ -49,7 +49,7 @@ void initPS2keyboard(t_PS2userRecvCallback PS2recvCallback, volatile uint8_t *p_
 /**
  * \brief Convert PS2 keyboard define representation
  * to a character.
- * 
+ *
  * \param ps2data PS2 keyboard data in a the form of a define from the scan code lookup table.
  *
  * \return Return a ASCII character
@@ -64,35 +64,35 @@ void updatePS2leds();
 
 /**
  * \brief Get keybreak state.
- * 
+ *
  * \return 0 for no keybreak, 1 for keybreak on last press.
  */
 uint8_t getKeybreakState();
 
 /**
  * \brief Get ID from keyboard
- * 
+ *
  * \return 16 bit id of keyboard.
  */
 uint16_t getKeyboardID();
 
 /**
  * \brief Get Caps lock state.
- * 
+ *
  * \return 1 for on, 0 for off.
  */
 uint8_t getCapsLockState();
 
 /**
  * \brief Get Num lock state.
- * 
+ *
  * \return 1 for on, 0 for off.
  */
 uint8_t getNumLockState();
 
 /**
  * \brief Get Scroll Lock state.
- * 
+ *
  * \return 1 for on, 0 for off.
  */
 uint8_t getScrollLockState();
@@ -128,10 +128,17 @@ void setPS2default();
 void sendPS2typmaticRateDelayCMD();
 
 /**
- * \brief Set PS2 typmatic parameters
- * 
- * \param delay set delay to a predefined amount.
- * \param rate set the rate to predefined amount.
+ * \brief Set PS2 typmatic parameters, if the number is invalid defaults are used
+ *
+ * \param delay set delay to a predefined amount, this can be 0 to 3.
+ *      0 = 250ms
+ *      1 = 500ms
+ *      2 = 750ms
+ *      3 = 1000ms
+ * \param rate set the rate to predefined amount. Between 0 to 0x1F
+ *      Theses are in cycles per second (hz) from 0x00 at 30 hz to
+ *      0x1F at 2 hz. A table is available at:
+ *      http://www.computer-engineering.org/ps2keyboard/
  */
 void setPS2typmaticRateDelay(uint8_t delay, uint8_t rate);
 
