@@ -54,7 +54,7 @@ void initPS2keyboard(t_PS2userRecvCallback PS2recvCallback, volatile uint8_t *p_
  *
  * \return Return a ASCII character
  */
-char defineToChar(uint8_t ps2data);
+char PS2defineToChar(uint8_t ps2data);
 
 /**
  * \brief Updates LEDS on keyboard, must be called in for loop, can NOT
@@ -67,35 +67,35 @@ void updatePS2leds();
  *
  * \return 0 for no keybreak, 1 for keybreak on last press.
  */
-uint8_t getKeybreakState();
+uint8_t getPS2keybreakState();
 
 /**
  * \brief Get ID from keyboard
  *
  * \return 16 bit id of keyboard.
  */
-uint16_t getKeyboardID();
+uint16_t getPS2keyboardID();
 
 /**
  * \brief Get Caps lock state.
  *
  * \return 1 for on, 0 for off.
  */
-uint8_t getCapsLockState();
+uint8_t getPS2capsLockState();
 
 /**
  * \brief Get Num lock state.
  *
  * \return 1 for on, 0 for off.
  */
-uint8_t getNumLockState();
+uint8_t getPS2numLockState();
 
 /**
  * \brief Get Scroll Lock state.
  *
  * \return 1 for on, 0 for off.
  */
-uint8_t getScrollLockState();
+uint8_t getPS2scrollLockState();
 
 /**
  * \brief Resend PS2 keyboards last byte to the host.

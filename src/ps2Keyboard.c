@@ -126,7 +126,7 @@ void initPS2keyboard(t_PS2userRecvCallback PS2recvCallback, volatile uint8_t *p_
 	setPS2leds(0, 0 ,0);
 }
 
-char defineToChar(uint8_t ps2data)
+char PS2defineToChar(uint8_t ps2data)
 {
 	uint8_t tmpSREG = 0;
 
@@ -143,7 +143,7 @@ char defineToChar(uint8_t ps2data)
 			{
 				SREG = tmpSREG;
 
-				return (getCapsLockState() ? e_set2scanCodes[index].ascii - 32 : e_set2scanCodes[index].ascii);
+				return (getPS2capsLockState() ? e_set2scanCodes[index].ascii - 32 : e_set2scanCodes[index].ascii);
 			}
 
 			SREG = tmpSREG;
@@ -169,7 +169,7 @@ void updatePS2leds()
 
 		sendPS2ledsCMD();
 
-		setPS2leds(getCapsLockState(), getNumLockState(), getScrollLockState());
+		setPS2leds(getPS2capsLockState(), getPS2numLockState(), getPS2scrollLockState());
 
 		cli();
 	}
@@ -179,27 +179,27 @@ void updatePS2leds()
 	SREG = tmpSREG;
 }
 
-uint8_t getKeybreakState()
+uint8_t getPS2keybreakState()
 {
 	return e_ps2keyboard.keybreak;
 }
 
-uint16_t getKeyboardID()
+uint16_t getPS2keyboardID()
 {
 	return e_ps2keyboard.id;
 }
 
-uint8_t getCapsLockState()
+uint8_t getPS2capsLockState()
 {
 	return e_ps2keyboard.leds.bit.cap;
 }
 
-uint8_t getNumLockState()
+uint8_t getPS2numLockState()
 {
 	return e_ps2keyboard.leds.bit.num;
 }
 
-uint8_t getScrollLockState()
+uint8_t getPS2scrollLockState()
 {
 	return e_ps2keyboard.leds.bit.scroll;
 }
@@ -625,19 +625,19 @@ void extractData(uint16_t ps2data)
 	switch(definePS2data)
 	{
 		case KEYCODE_CAPS:
-			if(!getKeybreakState())
+			if(!getPS2keybreakState())
 			{
 				e_ps2keyboard.leds.bit.cap = ~(e_ps2keyboard.leds.bit.cap & 0x01);
 			}
 			break;
 		case KEYCODE_NUM:
-			if(!getKeybreakState())
+			if(!getPS2keybreakState())
 			{
 				e_ps2keyboard.leds.bit.num = ~(e_ps2keyboard.leds.bit.num & 0x01);
 			}
 			break;
 		case KEYCODE_SCROLL:
-			if(!getKeybreakState())
+			if(!getPS2keybreakState())
 			{
 				e_ps2keyboard.leds.bit.scroll = ~(e_ps2keyboard.leds.bit.scroll & 0x01);
 			}
