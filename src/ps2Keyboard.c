@@ -1,29 +1,35 @@
-/*
- * AVR328P-LIBRARY-PS2_DRIVER
+/*******************************************************************************
+ * @file    psKeyboard.c
+ * @author  Jay Convertino(electrobs@gmail.com)
+ * @date    2024.03.12
+ * @brief   ps2 keyboard driver
+ * @version 0.0.0
  *
- *  Created on: September 28, 2017
- *      Author: John Convertino
- *			email: electrobs@gmail.com
+ * @TODO
+ *  - Cleanup interface
  *
-    Copyright (C) 2017 John Convertino
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License along
-    with this program; if not, write to the Free Software Foundation, Inc.,
-    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ * @license mit
  *
- *		Version: v1.0
- *		 September 28, 2017 v1.0 first release version
- */
+ * Copyright 2024 Johnathan Convertino
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ * IN THE SOFTWARE.
+ ******************************************************************************/
 
 
 #include <avr/io.h>
@@ -34,616 +40,635 @@
 #include <util/delay.h>
 
 #include "ps2Keyboard.h"
-#include "ps2DataType.h"
 #include "ps2scanCodes.h"
 
-struct s_ps2keyboard e_ps2keyboard;
+volatile int toggle = 0;
+
+struct s_ps2 g_ps2;
+
+enum callbackStates {waiting, no_cmd, resend_cmd, ack_cmd, ready_cmd, keyboard_id};
+enum keyReleaseStates {no_release, release};
+
+struct s_ps2keyboard
+{
+  union
+  {
+    struct
+    {
+      uint8_t scroll:1;
+      uint8_t num:1;
+      uint8_t cap:1;
+      uint8_t nothing:5;
+    } bit;
+
+    uint8_t packet;
+  } leds, prevLEDS;
+
+  union
+  {
+    struct
+    {
+      uint8_t rate:4;
+      uint8_t delay:4;
+    } param;
+
+    uint8_t packet;
+  } typematic;
+
+  volatile enum keyReleaseStates prevCapRelease;
+  volatile enum keyReleaseStates prevNumRelease;
+  volatile enum keyReleaseStates prevScrollRelease;
+
+  volatile uint8_t keybreak:1;
+  volatile uint8_t idRecv:1;
+
+  uint16_t id;
+
+  volatile enum keyReleaseStates keyReleaseState;
+  volatile enum callbackStates callbackState;
+} g_ps2keyboard;
 
 //helper functions
 //waits for callback to return, returns state of the callback for error
 //handling (none implimented at this time).
 enum callbackStates waitingForCallback();
-//convert raw PS2 data to a define via a lookup table. This will set the
-//keybreak flag on or off.
+//wait for idle state in rx/tx irq
+void waitForDataIdle();
+//convert raw PS2 data to a define via a lookup table. This will set the keybreak flag on or off.
 uint8_t convertToDefine(uint8_t ps2data);
 //Converts PS2 data to raw data, this performs checks on the data.
 //If it returns 0 then the data is invalid.
 uint8_t convertToRaw(uint16_t ps2data);
-//Send the PS2 led command that allows PS2 LED states to be send to the
-//keyboard.
+//Send the PS2 led command that allows PS2 LED states to be send to the keyboard.
 void sendPS2ledsCMD();
 //set internal LED tracking and send LED state to keyboard.
 void setPS2leds(uint8_t caps, uint8_t num, uint8_t scroll);
 //generate odd parity
-uint8_t oddParityGen(uint8_t data);
+uint8_t oddParityGen(uint16_t data);
 //convert 8 bit data into a 11 bit packet
 uint16_t dataToPacket(uint8_t data);
 //copys data passed to it to the internal send buffer.
-void copyPacketToSendBuf(uint16_t packet);
+void copyPacketToBuffer(uint16_t packet);
 //start trasmission of data to the keyboard.
 void startTransmit();
 //CALLBACK ROUTINES
-//generic routine for keyboard commands that don't send a data byte after
-void checkForAck(uint16_t ps2Data);
-//On keyboard reset this checks for keyboard ready byte.
-void checkForKeyRdy(uint16_t ps2Data);
-//Gets the ID of keyboard and stores it for later use.
-void getID(uint16_t ps2Data);
-//Default callback for recv that processes data and then hands it off to
-//the user callback.
+//check the response to keyboard command sent and perform needed operations
+void checkKeyboardResponse(uint16_t ps2Data);
+//Default callback for recv that processes data and then hands it off to the user callback.
 void extractData(uint16_t ps2data);
 
-void initPS2keyboard(t_PS2userRecvCallback PS2recvCallback, volatile uint8_t *p_port, uint8_t clkPin, uint8_t dataPin)
+void initPS2keyboard(t_PS2userRecvCallback PS2recvCallback, void (*setPS2_PORT_Device)(struct s_ps2 *p_device), volatile uint8_t *p_port, uint8_t clkPin, uint8_t dataPin)
 {
-	uint8_t tmpSREG = 0;
+  uint8_t tmpSREG = 0;
 
-	tmpSREG = SREG;
-	cli();
+  tmpSREG = SREG;
+  cli();
 
-	if(p_port == NULL) return;
+  if(p_port == NULL) return;
 
-	if(PS2recvCallback == NULL) return;
+  if(PS2recvCallback == NULL) return;
 
-	memset(&e_ps2keyboard, 0, sizeof(e_ps2keyboard));
+  if(setPS2_PORT_Device == NULL) return;
 
-	e_ps2keyboard.clkPin = clkPin;
-	e_ps2keyboard.dataPin = dataPin;
-	e_ps2keyboard.p_port = p_port;
-	e_ps2keyboard.callbackState = done;
-	e_ps2keyboard.userRecvCallback = PS2recvCallback;
-	e_ps2keyboard.recvCallback = &checkForAck;
+  setPS2_PORT_Device(&g_ps2);
 
-	e_ps2keyboard.modeFlag = RECV_MODE;
+  memset(&g_ps2keyboard, 0, sizeof(g_ps2keyboard));
 
-	*(e_ps2keyboard.p_port - 1) &= ~(1 << e_ps2keyboard.clkPin);
-	*(e_ps2keyboard.p_port - 1) &= ~(1 << e_ps2keyboard.dataPin);
+  memset(&g_ps2, 0, sizeof(g_ps2));
 
-	if(e_ps2keyboard.p_port == &PORTB)
-	{
-		PCICR |= 1 << PCIE0;
-		PCMSK0 |= 1 << e_ps2keyboard.clkPin;
-	}
-	else if(e_ps2keyboard.p_port == &PORTC)
-	{
-		PCICR |= 1 << PCIE1;
-		PCMSK1 |= 1 << e_ps2keyboard.clkPin;
-	}
-	else
-	{
-		PCICR |= 1 << PCIE2;
-		PCMSK2 |= 1 << e_ps2keyboard.clkPin;
-	}
+  g_ps2.clkPin = clkPin;
+  g_ps2.dataPin = dataPin;
+  g_ps2.p_port = p_port;
+  g_ps2.lastAckState = ack;
+  g_ps2.dataState = idle;
+  g_ps2.userRecvCallback = PS2recvCallback;
+  g_ps2.recvCallback = &extractData;
 
-	SREG = tmpSREG;
+  g_ps2keyboard.prevCapRelease    = release;
+  g_ps2keyboard.prevNumRelease    = release;
+  g_ps2keyboard.prevScrollRelease = release;
 
-	sei();
+  *(g_ps2.p_port - 1) &= ~(1 << g_ps2.clkPin);
+  *(g_ps2.p_port - 1) &= ~(1 << g_ps2.dataPin);
 
-	//initialize keyboard using PC init method
-	resetPS2keyboard();
+  if(g_ps2.p_port == &PORTB)
+  {
+    PCICR |= 1 << PCIE0;
+    PCMSK0 |= 1 << g_ps2.clkPin;
+  }
+  else if(g_ps2.p_port == &PORTC)
+  {
+    PCICR |= 1 << PCIE1;
+    PCMSK1 |= 1 << g_ps2.clkPin;
+  }
+  else
+  {
+    PCICR |= 1 << PCIE2;
+    PCMSK2 |= 1 << g_ps2.clkPin;
+  }
 
-	sendPS2ledsCMD();
+  SREG = tmpSREG;
 
-	setPS2leds(0, 0 ,0);
+  sei();
+
+  //initialize keyboard using PC init method
+  resetPS2keyboard();
+
+  sendPS2ledsCMD();
+
+  setPS2leds(0, 0, 0);
 }
 
 char PS2defineToChar(uint8_t ps2data)
 {
-	uint8_t tmpSREG = 0;
+  uint8_t tmpSREG = 0;
 
-	tmpSREG = SREG;
-	cli();
+  tmpSREG = SREG;
+  cli();
 
-	int index = 0;
+  int index = 0;
 
-	for(index = 0; e_set2scanCodes[index].defineCode != 0; index++)
-	{
-		if(e_set2scanCodes[index].defineCode == ps2data)
-		{
-			if((e_set2scanCodes[index].ascii >= 'a') && (e_set2scanCodes[index].ascii <= 'z'))
-			{
-				SREG = tmpSREG;
+  for(index = 0; e_set2scanCodes[index].defineCode != 0; index++)
+  {
+    if(e_set2scanCodes[index].defineCode == ps2data)
+    {
+      if((e_set2scanCodes[index].ascii >= 'a') && (e_set2scanCodes[index].ascii <= 'z'))
+      {
+        SREG = tmpSREG;
 
-				return (getPS2capsLockState() ? e_set2scanCodes[index].ascii - 32 : e_set2scanCodes[index].ascii);
-			}
+        return (getPS2capsLockState() ? e_set2scanCodes[index].ascii - 32 : e_set2scanCodes[index].ascii);
+      }
 
-			SREG = tmpSREG;
-			return e_set2scanCodes[index].ascii;
-		}
-	}
+      SREG = tmpSREG;
 
-	SREG = tmpSREG;
-	return e_set2scanCodes[index].ascii;
+      return e_set2scanCodes[index].ascii;
+    }
+  }
+
+  SREG = tmpSREG;
+  return e_set2scanCodes[index].ascii;
 }
 
 void updatePS2leds()
 {
-	static uint8_t prevLEDS = 0;
-	uint8_t tmpSREG = 0;
+  waitForDataIdle();
 
-	tmpSREG = SREG;
-	cli();
+  if(g_ps2keyboard.prevLEDS.packet != g_ps2keyboard.leds.packet)
+  {
+    sendPS2ledsCMD();
 
-	if(prevLEDS != e_ps2keyboard.leds.packet)
-	{
-		SREG = tmpSREG;
+    setPS2leds(getPS2capsLockState(), getPS2numLockState(), getPS2scrollLockState());
+  }
 
-		sendPS2ledsCMD();
-
-		setPS2leds(getPS2capsLockState(), getPS2numLockState(), getPS2scrollLockState());
-
-		cli();
-	}
-
-	prevLEDS = e_ps2keyboard.leds.packet;
-
-	SREG = tmpSREG;
+  g_ps2keyboard.prevLEDS.packet = g_ps2keyboard.leds.packet;
 }
 
-uint8_t getPS2keybreakState()
+uint8_t getPS2keyReleased()
 {
-	return e_ps2keyboard.keybreak;
+  return (g_ps2keyboard.keyReleaseState == release);
 }
 
 uint16_t getPS2keyboardID()
 {
-	return e_ps2keyboard.id;
+  return g_ps2keyboard.id;
 }
 
 uint8_t getPS2capsLockState()
 {
-	return e_ps2keyboard.leds.bit.cap;
+  return g_ps2keyboard.leds.bit.cap;
 }
 
 uint8_t getPS2numLockState()
 {
-	return e_ps2keyboard.leds.bit.num;
+  return g_ps2keyboard.leds.bit.num;
 }
 
 uint8_t getPS2scrollLockState()
 {
-	return e_ps2keyboard.leds.bit.scroll;
+  return g_ps2keyboard.leds.bit.scroll;
 }
 
 void resendPS2lastByte()
 {
-	uint16_t tempConv = 0;
+  uint8_t tmpSREG = SREG;
+  uint16_t tempConv = 0;
 
-	//wait till we are done sending last command.
-	while(e_ps2keyboard.modeFlag == SEND_MODE);
+  waitForDataIdle();
 
-	tempConv = dataToPacket(CMD_RESEND);
+  cli();
 
-	copyPacketToSendBuf(tempConv);
+  tempConv = dataToPacket(CMD_RESEND);
 
-	startTransmit();
+  copyPacketToBuffer(tempConv);
+
+  startTransmit();
+
+  SREG = tmpSREG;
+
+  waitingForCallback();
 }
 
 void resetPS2keyboard()
 {
-	uint16_t tempConv = 0;
+  uint8_t tmpSREG = SREG;
+  uint16_t tempConv = 0;
 
-	//wait till we are done sending last command.
-	while(e_ps2keyboard.modeFlag == SEND_MODE);
+  waitForDataIdle();
 
-	e_ps2keyboard.recvCallback = &checkForKeyRdy;
+  cli();
 
-	e_ps2keyboard.callbackState = waiting;
+  tempConv = dataToPacket(CMD_RESET);
 
-	tempConv = dataToPacket(CMD_RESET);
+  copyPacketToBuffer(tempConv);
 
-	copyPacketToSendBuf(tempConv);
+  startTransmit();
 
-	startTransmit();
+  SREG = tmpSREG;
 
-	waitingForCallback();
+  waitingForCallback();
 }
 
 void disablePS2keyboard()
 {
-	uint16_t tempConv = 0;
+  uint8_t tmpSREG = SREG;
+  uint16_t tempConv = 0;
 
-	//wait till we are done sending last command.
-	while(e_ps2keyboard.modeFlag == SEND_MODE);
+  waitForDataIdle();
 
-	e_ps2keyboard.recvCallback = &checkForAck;
+  cli();
 
-	e_ps2keyboard.callbackState = waiting;
+  tempConv = dataToPacket(CMD_DISABLE);
 
-	tempConv = dataToPacket(CMD_DISABLE);
+  copyPacketToBuffer(tempConv);
 
-	copyPacketToSendBuf(tempConv);
+  startTransmit();
 
-	startTransmit();
+  SREG = tmpSREG;
 
-	waitingForCallback();
+  waitingForCallback();
 }
 
 void enablePS2keyaboard()
 {
-	uint16_t tempConv = 0;
+  uint8_t tmpSREG = SREG;
+  uint16_t tempConv = 0;
 
-	//wait till we are done sending last command.
-	while(e_ps2keyboard.modeFlag == SEND_MODE);
+  waitForDataIdle();
 
-	e_ps2keyboard.recvCallback = &checkForAck;
+  cli();
 
-	e_ps2keyboard.callbackState = waiting;
+  tempConv = dataToPacket(CMD_ENABLE);
 
-	tempConv = dataToPacket(CMD_ENABLE);
+  copyPacketToBuffer(tempConv);
 
-	copyPacketToSendBuf(tempConv);
+  startTransmit();
 
-	startTransmit();
+  SREG = tmpSREG;
 
-	waitingForCallback();
+  waitingForCallback();
 }
 
 void setPS2default()
 {
-	uint16_t tempConv = 0;
+  uint8_t tmpSREG = SREG;
+  uint16_t tempConv = 0;
 
-	//wait till we are done sending last command.
-	while(e_ps2keyboard.modeFlag == SEND_MODE);
+  waitForDataIdle();
 
-	e_ps2keyboard.recvCallback = &checkForAck;
+  cli();
 
-	e_ps2keyboard.callbackState = waiting;
+  tempConv = dataToPacket(CMD_DEFAULT);
 
-	tempConv = dataToPacket(CMD_DEFAULT);
+  copyPacketToBuffer(tempConv);
 
-	copyPacketToSendBuf(tempConv);
+  startTransmit();
 
-	startTransmit();
+  SREG = tmpSREG;
 
-	waitingForCallback();
+  waitingForCallback();
 }
 
 void sendPS2typmaticRateDelayCMD()
 {
-	uint16_t tempConv = 0;
+  uint8_t tmpSREG = SREG;
+  uint16_t tempConv = 0;
 
-	//wait till we are done sending last command.
-	while(e_ps2keyboard.modeFlag == SEND_MODE);
+  waitForDataIdle();
 
-	e_ps2keyboard.recvCallback = &checkForAck;
+  cli();
 
-	e_ps2keyboard.callbackState = waiting;
+  tempConv = dataToPacket(CMD_SET_RATE);
 
-	tempConv = dataToPacket(CMD_SET_RATE);
+  copyPacketToBuffer(tempConv);
 
-	copyPacketToSendBuf(tempConv);
+  startTransmit();
 
-	startTransmit();
+  SREG = tmpSREG;
 
-	waitingForCallback();
+  waitingForCallback();
 }
 
 void setPS2typmaticRateDelay(uint8_t delay, uint8_t rate)
 {
-	uint16_t tempConv = 0;
+  uint8_t tmpSREG = SREG;
+  uint16_t tempConv = 0;
 
-	//wait till we are done sending last command.
-	while(e_ps2keyboard.modeFlag == SEND_MODE);
+  waitForDataIdle();
 
-	e_ps2keyboard.recvCallback = &checkForAck;
+  cli();
 
-	e_ps2keyboard.callbackState = waiting;
+  g_ps2keyboard.typematic.param.rate = (rate <= MAX_REPEAT_RATE ? rate : DEFAULT_RATE);
 
-	e_ps2keyboard.typematic.param.rate = (rate <= MAX_REPEAT_RATE ? rate : DEFAULT_RATE);
+  g_ps2keyboard.typematic.param.delay = (delay <= MAX_DELAY ? delay : DEFAULT_DELAY);
 
-	e_ps2keyboard.typematic.param.delay = (delay <= MAX_DELAY ? delay : DEFAULT_DELAY);
+  tempConv = dataToPacket(g_ps2keyboard.typematic.packet);
 
-	tempConv = dataToPacket(e_ps2keyboard.typematic.packet);
+  copyPacketToBuffer(tempConv);
 
-	copyPacketToSendBuf(tempConv);
+  startTransmit();
 
-	startTransmit();
+  SREG = tmpSREG;
 
-	waitingForCallback();
+  waitingForCallback();
 }
 
 void sendPS2readIDcmd()
 {
-	uint16_t tempConv = 0;
+  uint8_t tmpSREG = SREG;
+  uint16_t tempConv = 0;
 
-	//wait till we are done sending last command.
-	while(e_ps2keyboard.modeFlag == SEND_MODE);
+  waitForDataIdle();
 
-	e_ps2keyboard.id = 0;
+  cli();
 
-	e_ps2keyboard.recvCallback = &getID;
+  g_ps2keyboard.id = 0;
 
-	e_ps2keyboard.idRecv = ID_NRECV;
+  tempConv = dataToPacket(CMD_READ_ID);
 
-	e_ps2keyboard.callbackState = waiting;
+  copyPacketToBuffer(tempConv);
 
-	tempConv = dataToPacket(CMD_READ_ID);
+  startTransmit();
 
-	copyPacketToSendBuf(tempConv);
+  SREG = tmpSREG;
 
-	startTransmit();
-
-	waitingForCallback();
+  waitingForCallback();
 }
 
 //helper functions
 enum callbackStates waitingForCallback()
 {
-	while(e_ps2keyboard.callbackState == waiting);
+  while(g_ps2keyboard.callbackState != waiting);
 
-	return e_ps2keyboard.callbackState;
+  return g_ps2keyboard.callbackState;
+}
+
+void waitForDataIdle()
+{
+  while(g_ps2.dataState != idle);
 }
 
 uint8_t convertToDefine(uint8_t ps2data)
 {
-	int index = 0;
-	static int shift = 0;
-	static uint64_t buffer = 0;
+  int index = 0;
+  static int shift = 0;
+  static uint64_t buffer = 0;
 
-	buffer |= (uint64_t)(ps2data << shift);
+  buffer |= (uint64_t)(ps2data << shift);
 
-	for(index = 0; e_set2scanCodes[index].defineCode != 0; index++)
-	{
-		if(e_set2scanCodes[index].keyCode == buffer)
-		{
-			buffer = 0;
-			shift = 0;
-			e_ps2keyboard.keybreak = NKEYBREAK;
-			return e_set2scanCodes[index].defineCode;
-		}
+  for(index = 0; e_set2scanCodes[index].defineCode != 0; index++)
+  {
+    if(e_set2scanCodes[index].keyCode == buffer)
+    {
+      buffer = 0;
+      shift = 0;
+      g_ps2keyboard.keyReleaseState = no_release;
+      return e_set2scanCodes[index].defineCode;
+    }
 
-		if(e_set2scanCodes[index].breakCode == buffer)
-		{
-			buffer = 0;
-			shift = 0;
-			e_ps2keyboard.keybreak = KEYBREAK;
-			return e_set2scanCodes[index].defineCode;
-		}
-	}
+    if(e_set2scanCodes[index].breakCode == buffer)
+    {
+      buffer = 0;
+      shift = 0;
+      g_ps2keyboard.keyReleaseState = release;
+      return e_set2scanCodes[index].defineCode;
+    }
+  }
 
-	shift += BIT_COUNT;
-	shift %= MAX_BIT_COUNT;
+  //shift by a byte for each miss, up to the total number of bytes in a 64 bit int
+  shift += sizeof(uint8_t)*8;
+  shift %= sizeof(uint64_t)*8;
 
-	if(!shift)
-	{
-		buffer = 0;
-	}
+  //we have wrapped around, reset buffer to 0. this is an error.
+  if(!shift)
+  {
+    buffer = 0;
+  }
 
-	e_ps2keyboard.keybreak = NKEYBREAK;
+  g_ps2keyboard.keyReleaseState = no_release;
 
-	return 0;
+  return 0;
 }
 
 uint8_t convertToRaw(uint16_t ps2data)
 {
-	uint8_t tmpParity = 0;
+  uint8_t tmpParity = 0;
 
-	tmpParity = oddParityGen((uint8_t)(ps2data >> DATA_BIT0_POS) & 0xFF);
+  tmpParity = oddParityGen((uint8_t)((ps2data >> DATA_BIT0_POS) & 0x00FF));
 
-	if(tmpParity != (uint8_t)((ps2data >> PARITY_BIT_POS) & 0x0001)) return 0;
+  if(tmpParity != (uint8_t)((ps2data >> PARITY_BIT_POS) & 0x0001)) return 0;
 
-	return (uint8_t)((ps2data >> DATA_BIT0_POS) & 0x00FF);
+  return (uint8_t)((ps2data >> DATA_BIT0_POS) & 0x00FF);
 }
 
 void sendPS2ledsCMD()
 {
-	uint16_t tempConv = 0;
+  uint8_t tmpSREG = SREG;
+  uint16_t tempConv = 0;
 
-	//wait till we are done sending last command.
-	while(e_ps2keyboard.modeFlag == SEND_MODE);
+  //wait till we are done sending last command.
+  waitForDataIdle();
 
-	e_ps2keyboard.recvCallback = &checkForAck;
+  cli();
 
-	e_ps2keyboard.callbackState = waiting;
+  tempConv = dataToPacket(CMD_SET_LED);
 
-	tempConv = dataToPacket(CMD_SET_LED);
+  copyPacketToBuffer(tempConv);
 
-	copyPacketToSendBuf(tempConv);
+  startTransmit();
 
-	startTransmit();
+  //no ack
+  g_ps2.recvCallback = &extractData;
+  g_ps2keyboard.callbackState = no_cmd;
 
-	waitingForCallback();
+  SREG = tmpSREG;
+
+//   waitingForCallback();
 }
 
 void setPS2leds(uint8_t caps, uint8_t num, uint8_t scroll)
 {
-	uint16_t tempConv = 0;
+  uint8_t tmpSREG = SREG;
+  uint16_t tempConv = 0;
 
-	//wait till we are done sending last command.
-	while(e_ps2keyboard.modeFlag == SEND_MODE);
+  waitForDataIdle();
 
-	e_ps2keyboard.recvCallback = &checkForAck;
+  cli();
 
-	e_ps2keyboard.callbackState = waiting;
+  g_ps2keyboard.leds.bit.cap = caps & 0x01;
 
-	e_ps2keyboard.leds.bit.cap = (caps != 0 ? 1 : 0);
+  g_ps2keyboard.leds.bit.num = num & 0x01;
 
-	e_ps2keyboard.leds.bit.num = (num != 0 ? 1 : 0);
+  g_ps2keyboard.leds.bit.scroll = scroll & 0x01;
 
-	e_ps2keyboard.leds.bit.scroll = (scroll != 0 ? 1 : 0);
+  tempConv = dataToPacket(g_ps2keyboard.leds.packet);
 
-	tempConv = dataToPacket(e_ps2keyboard.leds.packet);
+  copyPacketToBuffer(tempConv);
 
-	copyPacketToSendBuf(tempConv);
+  startTransmit();
 
-	startTransmit();
+  SREG = tmpSREG;
 
-	waitingForCallback();
+  waitingForCallback();
 }
 
-uint8_t oddParityGen(uint8_t data)
+uint8_t oddParityGen(uint16_t data)
 {
-	//setting to 1 generates odd parity. 0 for even.
-	uint8_t tempParity = 1;
-	uint8_t index = 0;
+  //setting to 1 generates odd parity. 0 for even.
+  uint8_t tempParity = 1;
+  uint8_t index = 0;
 
-	for(index = 0; index < UINT8_T_SIZE; index++)
-	{
-		tempParity ^= (data >> index) & 0x01;
-	}
+  for(index = 0; index < sizeof(uint16_t)*8; index++)
+  {
+    tempParity ^= (data >> index) & 0x01;
+  }
 
-	return tempParity;
+  return tempParity;
 }
 
 //convert data to packet
 uint16_t dataToPacket(uint8_t data)
 {
-	uint8_t parity = 0;
-	uint16_t tempConv = 0;
+  uint8_t parity = 0;
+  uint16_t tempConv = 0;
 
-	tempConv = (uint16_t)data << DATA_BIT0_POS;
+  //start value is 0, tempConv set to 0, no need to do again.
+  tempConv |= ((uint16_t)data) << DATA_BIT0_POS;
 
-	parity = oddParityGen(data);
+  parity = oddParityGen(data);
 
-	tempConv |= (uint16_t)parity << PARITY_BIT_POS;
+  tempConv |= ((uint16_t)parity) << PARITY_BIT_POS;
 
-	tempConv |= (uint16_t)STOP_BIT_VALUE << STOP_BIT_POS;
+  tempConv |= ((uint16_t)STOP_BIT_VALUE) << STOP_BIT_POS;
 
-	return tempConv;
+  return tempConv;
 }
 
 //copy to send buffer
-void copyPacketToSendBuf(uint16_t packet)
+void copyPacketToBuffer(uint16_t packet)
 {
-	e_ps2keyboard.sendBuffer = packet;
+  g_ps2.buffer = packet;
 }
 
 //start transmit routine.
 void startTransmit()
 {
-	uint8_t tmpSREG = SREG;
-	cli();
+  g_ps2.dataState = send;
 
-	e_ps2keyboard.modeFlag = SEND_MODE;
+  g_ps2keyboard.callbackState = waiting;
 
-	e_ps2keyboard.sendIndex = 0;
+  g_ps2.recvCallback = &checkKeyboardResponse;
 
-	*(e_ps2keyboard.p_port - 1) |= 1 << e_ps2keyboard.clkPin;
+  //set clock pin low for at least 100ms
+  *(g_ps2.p_port - 1) |= 1 << g_ps2.clkPin;
 
-	*e_ps2keyboard.p_port &= ~(1 << e_ps2keyboard.clkPin);
+  *g_ps2.p_port &= ~(1 << g_ps2.clkPin);
 
-	_delay_ms(100);
+  _delay_ms(110);
 
-	*(e_ps2keyboard.p_port - 1) |= 1 << e_ps2keyboard.dataPin;
+  //set data pin to output and set low
+  *(g_ps2.p_port - 1) |= 1 << g_ps2.dataPin;
 
-	*e_ps2keyboard.p_port &= (e_ps2keyboard.sendBuffer << e_ps2keyboard.dataPin) | ~(1 << e_ps2keyboard.dataPin);
+  *g_ps2.p_port &= ~(1 << g_ps2.dataPin);
 
-	*(e_ps2keyboard.p_port - 1) &= ~(1 << e_ps2keyboard.clkPin);
+  //release clock pin by setting to input
+  *(g_ps2.p_port - 1) &= ~(1 << g_ps2.clkPin);
 
-	e_ps2keyboard.sendIndex++;
-
-	SREG = tmpSREG;
+  g_ps2.index++;
 }
 
-void checkForAck(uint16_t ps2Data)
+void checkKeyboardResponse(uint16_t ps2Data)
 {
-	uint8_t convData = 0;
+  uint8_t convData = 0;
 
-	convData = convertToRaw(ps2Data);
+  convData = convertToRaw(ps2Data);
 
-	switch(convData)
-	{
-		case CMD_ACK:
-			e_ps2keyboard.callbackState = done;
-			e_ps2keyboard.recvCallback = &extractData;
-			break;
-		case CMD_RESEND:
-			e_ps2keyboard.callbackState = resend;
-			break;
-		default:
-			e_ps2keyboard.callbackState = error;
-			e_ps2keyboard.recvCallback = &extractData;
-			break;
-	}
-}
-
-void checkForKeyRdy(uint16_t ps2Data)
-{
-	uint8_t convData = 0;
-
-	convData = convertToRaw(ps2Data);
-
-	switch(convData)
-	{
-		case CMD_KEY_RDY:
-			e_ps2keyboard.callbackState = done;
-			e_ps2keyboard.recvCallback = &extractData;
-			break;
-		case CMD_RESEND:
-			e_ps2keyboard.callbackState = resend;
-			break;
-		case CMD_ACK:
-			e_ps2keyboard.callbackState = waiting;
-			break;
-		default:
-			e_ps2keyboard.callbackState = error;
-			e_ps2keyboard.recvCallback = &extractData;
-			break;
-	}
-}
-
-void getID(uint16_t ps2Data)
-{
-	uint8_t convData = 0;
-
-	convData = convertToRaw(ps2Data);
-
-	switch(convData)
-	{
-		case KEYBOARD_ID1:
-			e_ps2keyboard.id |= convData;
-			e_ps2keyboard.callbackState = waiting;
-			break;
-		case KEYBOARD_ID2:
-			e_ps2keyboard.id |= convData << UINT8_T_SIZE;
-			e_ps2keyboard.idRecv = ID_RECV;
-			e_ps2keyboard.callbackState = done;
-			e_ps2keyboard.recvCallback = &extractData;
-			break;
-		case CMD_RESEND:
-			e_ps2keyboard.callbackState = resend;
-			break;
-		case CMD_ACK:
-			e_ps2keyboard.callbackState = waiting;
-			break;
-		default:
-			e_ps2keyboard.callbackState = error;
-			e_ps2keyboard.recvCallback = &extractData;
-			break;
-	}
+  switch(convData)
+  {
+    case CMD_KEY_RDY:
+      g_ps2.recvCallback = &extractData;
+      g_ps2keyboard.callbackState = ready_cmd;
+      break;
+    case CMD_RESEND:
+      g_ps2.recvCallback = &extractData;
+      g_ps2keyboard.callbackState = resend_cmd;
+      break;
+    case CMD_ACK:
+      g_ps2.recvCallback = &extractData;
+      g_ps2keyboard.callbackState = ack_cmd;
+      break;
+    case KEYBOARD_ID1:
+      g_ps2keyboard.id |= convData;
+      g_ps2keyboard.callbackState = waiting;
+      break;
+    case KEYBOARD_ID2:
+      g_ps2keyboard.id |= convData << sizeof(uint8_t)*8;
+      g_ps2.recvCallback = &extractData;
+      g_ps2keyboard.callbackState = keyboard_id;
+      break;
+    default:
+      g_ps2.recvCallback = &extractData;
+      g_ps2keyboard.callbackState = no_cmd;
+      break;
+  }
 }
 
 void extractData(uint16_t ps2data)
 {
-	uint8_t rawPS2data = 0;
-	uint8_t definePS2data = 0;
+  uint8_t rawPS2data = 0;
+  uint8_t definePS2data = 0;
 
-	rawPS2data = convertToRaw(ps2data);
+  rawPS2data = convertToRaw(ps2data);
 
-	definePS2data = convertToDefine(rawPS2data);
+  definePS2data = convertToDefine(rawPS2data);
 
-	switch(definePS2data)
-	{
-		case KEYCODE_CAPS:
-			if(!getPS2keybreakState())
-			{
-				e_ps2keyboard.leds.bit.cap = ~(e_ps2keyboard.leds.bit.cap & 0x01);
-			}
-			break;
-		case KEYCODE_NUM:
-			if(!getPS2keybreakState())
-			{
-				e_ps2keyboard.leds.bit.num = ~(e_ps2keyboard.leds.bit.num & 0x01);
-			}
-			break;
-		case KEYCODE_SCROLL:
-			if(!getPS2keybreakState())
-			{
-				e_ps2keyboard.leds.bit.scroll = ~(e_ps2keyboard.leds.bit.scroll & 0x01);
-			}
-			break;
-		default:
-			e_ps2keyboard.userRecvCallback(definePS2data);
-			break;
-	}
+  switch(definePS2data)
+  {
+    case KEYCODE_CAPS:
+      if(!getPS2keyReleased() && (g_ps2keyboard.prevCapRelease == release))
+      {
+        g_ps2keyboard.leds.bit.cap = ~g_ps2keyboard.leds.bit.cap;
+      }
+
+      g_ps2keyboard.prevCapRelease = g_ps2keyboard.keyReleaseState;
+      break;
+    case KEYCODE_NUM:
+      if(!getPS2keyReleased() && (g_ps2keyboard.prevNumRelease == release))
+      {
+        g_ps2keyboard.leds.bit.num = ~g_ps2keyboard.leds.bit.num;
+      }
+
+      g_ps2keyboard.prevNumRelease = g_ps2keyboard.keyReleaseState;
+      break;
+    case KEYCODE_SCROLL:
+      if(!getPS2keyReleased() && (g_ps2keyboard.prevScrollRelease == release))
+      {
+        g_ps2keyboard.leds.bit.scroll = ~g_ps2keyboard.leds.bit.scroll;
+      }
+
+      g_ps2keyboard.prevScrollRelease = g_ps2keyboard.keyReleaseState;
+      break;
+    default:
+      g_ps2.userRecvCallback(definePS2data);
+      break;
+  }
 }

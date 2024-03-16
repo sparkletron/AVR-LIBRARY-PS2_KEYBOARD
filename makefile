@@ -2,7 +2,7 @@ SOURCES := src/ps2Keyboard.c
 ARCHIVE := $(addprefix lib,$(notdir $(SOURCES:.c=.a)))
 AVR_MMCU := $(if $(AVR_MMCU),$(AVR_MMCU),atmega328p)
 AVR_CPU_SPEED := $(if $(AVR_CPU_SPEED),$(AVR_CPU_SPEED),16000000UL)
-LIB_PATH :=
+LIB_PATH := PS2_BASE/src/
 
 CROSS_COMPILE := avr-
 CC := gcc

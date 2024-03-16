@@ -1,63 +1,45 @@
-/*
- * AVR328P-LIBRARY-PS2_DRIVER
+/*******************************************************************************
+ * @file    ps2keyboardDefines.h
+ * @author  Jay Convertino(electrobs@gmail.com)
+ * @date    2024.03.12
+ * @brief   defines for PS2
+ * @version 0.0.0
  *
- *  Created on: September 28, 2017
- *      Author: John Convertino
- *			email: electrobs@gmail.com
+ * @TODO
+ *  - Cleanup interface
  *
-    Copyright (C) 2017 John Convertino
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License along
-    with this program; if not, write to the Free Software Foundation, Inc.,
-    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ * @license mit
  *
- *		Version: v1.0
- *		 September 28, 2017 v1.0 first release version
- */
+ * Copyright 2024 Johnathan Convertino
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ * IN THE SOFTWARE.
+ ******************************************************************************/
 
 
-#ifndef PS2_DEFINES
-#define PS2_DEFINES
-
-typedef void (*t_PS2recvCallback)(uint16_t recvBuffer);
-typedef void (*t_PS2userRecvCallback)(uint8_t recvBuffer);
-enum callbackStates {done, waiting, error, resend, noack};
+#ifndef _PS2_KEYBOARD_DEFINES
+#define _PS2_KEYBOARD_DEFINES
 
 //bit defines
-#define MAX_BIT_COUNT    64
-#define BIT_COUNT        8
 #define MAX_REPEAT_RATE  0x1F
 #define MAX_DELAY        0x03
 #define DEFAULT_RATE     0x0B
 #define DEFAULT_DELAY    0x01
-
-//bool values
-#define RECV_MODE   0
-#define SEND_MODE   1
-#define NKEYBREAK   0
-#define KEYBREAK    1
-#define ID_NRECV    0
-#define ID_RECV     1
-
-//bit stuff
-#define DELAY_BITS_POS  5
-#define UINT8_T_SIZE    8
-#define PARITY_BIT_POS  9
-#define DATA_BIT0_POS   1
-#define STOP_BIT_POS    10
-#define STOP_BIT_VALUE  1
-#define SEND_BUFF_SIZE  12
-#define RECV_BUFF_SIZE  11
 
 //keyboard commands
 #define CMD_RESET       0xFF

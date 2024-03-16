@@ -1,50 +1,54 @@
-/**
- * \brief Driver to interface with PS2 based keyboard
+/*******************************************************************************
+ * @file    psKeyboard.h
+ * @author  Jay Convertino(electrobs@gmail.com)
+ * @date    2024.03.12
+ * @brief   ps2 keyboard driver
+ * @version 0.0.0
  *
- * \author John Convertino (electrobs@gmail.com)
- * \date   8/28/2017
+ * @TODO
+ *  - Cleanup interface
  *
-    Copyright (C) 2017 John Convertino
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License along
-    with this program; if not, write to the Free Software Foundation, Inc.,
-    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ * @license mit
  *
- * \version 1.0
- */
+ * Copyright 2024 Johnathan Convertino
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ * IN THE SOFTWARE.
+ ******************************************************************************/
 
-#ifndef ps2Keyboard
-#define ps2Keyboard
+#ifndef _ps2Keyboard
+#define _ps2Keyboard
 
 #include <inttypes.h>
 #include "ps2defines.h"
-
-#ifndef PS2PORTBIRQ_H_
-	#ifndef PS2PORTCIRQ_H_
-		#ifndef PS2PORTDIRQ_H_
-			#warning "ps2PORT B, C, or D irq.h must be included to use this library, and before the ps2Keyboard header to remove this warning."
-		#endif
-	#endif
-#endif
+#include "ps2keyboardDefines.h"
+#include "ps2DataType.h"
 
 /**
  * \brief initialize PS2 keyboard
  *
+ * \param PS2recvCallback Callback to a user supplied function to parse keyboard data.
+ * \param setPS2_PORT_device A function pointer to a IRQ port data setter.
  * \param p_port Gets the address of a port to be used for the clk and data pin.
  * \param clkPin Define which pin used for the clock
  * \param dataPin Define the pin used for data.
  */
-void initPS2keyboard(t_PS2userRecvCallback PS2recvCallback, volatile uint8_t *p_port, uint8_t clkPin, uint8_t dataPin);
+void initPS2keyboard(t_PS2userRecvCallback PS2recvCallback, void (*setPS2_PORT_Device)(struct s_ps2 *p_device), volatile uint8_t *p_port, uint8_t clkPin, uint8_t dataPin);
 
 /**
  * \brief Convert PS2 keyboard define representation
@@ -63,11 +67,11 @@ char PS2defineToChar(uint8_t ps2data);
 void updatePS2leds();
 
 /**
- * \brief Get keybreak state.
+ * \brief Is the current code a character with keybreak?
  *
- * \return 0 for no keybreak, 1 for keybreak on last press.
+ * \return 1 the current key is released, 0 is no release
  */
-uint8_t getPS2keybreakState();
+uint8_t getPS2keyReleased();
 
 /**
  * \brief Get ID from keyboard
