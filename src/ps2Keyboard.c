@@ -84,16 +84,32 @@ struct s_ps2keyboard
 
   uint16_t id;
 
+  uint8_t lastCMD;
+
   volatile enum keyReleaseStates keyReleaseState;
   volatile enum callbackStates callbackState;
 } g_ps2keyboard;
 
 //helper functions
 //waits for callback to return, returns state of the callback for error
+//sends commands
+void sendCommand(uint8_t command);
+//sends data, (does not update LAST_CMD);
+void sendData(uint8_t data);
+//sends commands that have no ack
+void sendCommand_noack(uint8_t command);
+//sends data that has no ack, (does not update LAST_CMD);
+void sendData_noack(uint8_t data);
 //handling (none implimented at this time).
 enum callbackStates waitingForCallback();
 //wait for idle state in rx/tx irq
 void waitForDataIdle();
+//wait for device ready AA, 00
+void waitForDevReady();
+//wait for command ack, eventually add timeouts to these methods
+void waitForCMDack();
+//wait for keyboard id state from callback
+void waitForKeyboardID();
 //convert raw PS2 data to a define via a lookup table. This will set the keybreak flag on or off.
 uint8_t convertToDefine(uint8_t ps2data);
 //Converts PS2 data to raw data, this performs checks on the data.
@@ -174,8 +190,6 @@ void initPS2keyboard(t_PS2userRecvCallback PS2recvCallback, void (*setPS2_PORT_D
   //initialize keyboard using PC init method
   resetPS2keyboard();
 
-  sendPS2ledsCMD();
-
   setPS2leds(0, 0, 0);
 }
 
@@ -215,8 +229,6 @@ void updatePS2leds()
 
   if(g_ps2keyboard.prevLEDS.packet != g_ps2keyboard.leds.packet)
   {
-    sendPS2ledsCMD();
-
     setPS2leds(getPS2capsLockState(), getPS2numLockState(), getPS2scrollLockState());
   }
 
@@ -250,160 +262,77 @@ uint8_t getPS2scrollLockState()
 
 void resendPS2lastByte()
 {
-  uint8_t tmpSREG = SREG;
-  uint16_t tempConv = 0;
-
-  waitForDataIdle();
-
-  cli();
-
-  tempConv = dataToPacket(CMD_RESEND);
-
-  copyPacketToBuffer(tempConv);
-
-  startTransmit();
-
-  SREG = tmpSREG;
-
-  waitingForCallback();
+  sendCommand(CMD_RESEND);
 }
 
 void resetPS2keyboard()
 {
-  uint8_t tmpSREG = SREG;
-  uint16_t tempConv = 0;
-
-  waitForDataIdle();
-
-  cli();
-
-  tempConv = dataToPacket(CMD_RESET);
-
-  copyPacketToBuffer(tempConv);
-
-  startTransmit();
-
-  SREG = tmpSREG;
-
-  waitingForCallback();
+  sendCommand(CMD_RESET);
 }
 
 void disablePS2keyboard()
 {
-  uint8_t tmpSREG = SREG;
-  uint16_t tempConv = 0;
-
-  waitForDataIdle();
-
-  cli();
-
-  tempConv = dataToPacket(CMD_DISABLE);
-
-  copyPacketToBuffer(tempConv);
-
-  startTransmit();
-
-  SREG = tmpSREG;
-
-  waitingForCallback();
+  sendCommand(CMD_DISABLE);
 }
 
 void enablePS2keyaboard()
 {
-  uint8_t tmpSREG = SREG;
-  uint16_t tempConv = 0;
-
-  waitForDataIdle();
-
-  cli();
-
-  tempConv = dataToPacket(CMD_ENABLE);
-
-  copyPacketToBuffer(tempConv);
-
-  startTransmit();
-
-  SREG = tmpSREG;
-
-  waitingForCallback();
+  sendCommand(CMD_ENABLE);
 }
 
 void setPS2default()
 {
-  uint8_t tmpSREG = SREG;
-  uint16_t tempConv = 0;
-
-  waitForDataIdle();
-
-  cli();
-
-  tempConv = dataToPacket(CMD_DEFAULT);
-
-  copyPacketToBuffer(tempConv);
-
-  startTransmit();
-
-  SREG = tmpSREG;
-
-  waitingForCallback();
+  sendCommand(CMD_DEFAULT);
 }
 
-void sendPS2typmaticRateDelayCMD()
-{
-  uint8_t tmpSREG = SREG;
-  uint16_t tempConv = 0;
-
-  waitForDataIdle();
-
-  cli();
-
-  tempConv = dataToPacket(CMD_SET_RATE);
-
-  copyPacketToBuffer(tempConv);
-
-  startTransmit();
-
-  SREG = tmpSREG;
-
-  waitingForCallback();
-}
-
+//broken? Need to check for ACKs
 void setPS2typmaticRateDelay(uint8_t delay, uint8_t rate)
 {
-  uint8_t tmpSREG = SREG;
-  uint16_t tempConv = 0;
-
-  waitForDataIdle();
-
-  cli();
-
   g_ps2keyboard.typematic.param.rate = (rate <= MAX_REPEAT_RATE ? rate : DEFAULT_RATE);
 
   g_ps2keyboard.typematic.param.delay = (delay <= MAX_DELAY ? delay : DEFAULT_DELAY);
 
-  tempConv = dataToPacket(g_ps2keyboard.typematic.packet);
+  sendCommand(CMD_SET_RATE);
 
-  copyPacketToBuffer(tempConv);
-
-  startTransmit();
-
-  SREG = tmpSREG;
-
-  waitingForCallback();
+  sendData(g_ps2keyboard.typematic.packet);
 }
 
 void sendPS2readIDcmd()
 {
-  uint8_t tmpSREG = SREG;
+  g_ps2keyboard.id = 0;
+
+  sendCommand(CMD_READ_ID);
+
+  waitForKeyboardID();
+}
+
+//helper functions
+void sendCommand(uint8_t command)
+{
+  g_ps2keyboard.lastCMD = command;
+
+  sendData(command);
+}
+
+void sendCommand_noack(uint8_t command)
+{
+  g_ps2keyboard.lastCMD = command;
+
+  sendData_noack(command);
+}
+
+void sendData(uint8_t data)
+{
+  uint8_t tmpSREG = 0;
   uint16_t tempConv = 0;
+
+  tmpSREG = SREG;
 
   waitForDataIdle();
 
   cli();
 
-  g_ps2keyboard.id = 0;
-
-  tempConv = dataToPacket(CMD_READ_ID);
+  tempConv = dataToPacket(data);
 
   copyPacketToBuffer(tempConv);
 
@@ -414,10 +343,33 @@ void sendPS2readIDcmd()
   waitingForCallback();
 }
 
-//helper functions
+void sendData_noack(uint8_t data)
+{
+  uint8_t tmpSREG = 0;
+  uint16_t tempConv = 0;
+
+  tmpSREG = SREG;
+
+  waitForDataIdle();
+
+  cli();
+
+  tempConv = dataToPacket(data);
+
+  copyPacketToBuffer(tempConv);
+
+  startTransmit();
+
+  //no ack
+  g_ps2.recvCallback = &extractData;
+  g_ps2keyboard.callbackState = no_cmd;
+
+  SREG = tmpSREG;
+}
+
 enum callbackStates waitingForCallback()
 {
-  while(g_ps2keyboard.callbackState != waiting);
+  while(g_ps2keyboard.callbackState == waiting);
 
   return g_ps2keyboard.callbackState;
 }
@@ -425,6 +377,26 @@ enum callbackStates waitingForCallback()
 void waitForDataIdle()
 {
   while(g_ps2.dataState != idle);
+}
+
+void waitForDevReady()
+{
+  g_ps2keyboard.callbackState = waiting;
+
+  g_ps2.recvCallback = &checkKeyboardResponse;
+
+  while(g_ps2keyboard.callbackState != ready_cmd);
+}
+
+void waitForKeyboardID()
+{
+  while(g_ps2keyboard.callbackState != keyboard_id);
+}
+
+//FA is ACK
+void waitForCMDack()
+{
+  while(g_ps2keyboard.callbackState != ack_cmd);
 }
 
 uint8_t convertToDefine(uint8_t ps2data)
@@ -480,55 +452,17 @@ uint8_t convertToRaw(uint16_t ps2data)
   return (uint8_t)((ps2data >> DATA_BIT0_POS) & 0x00FF);
 }
 
-void sendPS2ledsCMD()
-{
-  uint8_t tmpSREG = SREG;
-  uint16_t tempConv = 0;
-
-  //wait till we are done sending last command.
-  waitForDataIdle();
-
-  cli();
-
-  tempConv = dataToPacket(CMD_SET_LED);
-
-  copyPacketToBuffer(tempConv);
-
-  startTransmit();
-
-  //no ack
-  g_ps2.recvCallback = &extractData;
-  g_ps2keyboard.callbackState = no_cmd;
-
-  SREG = tmpSREG;
-
-//   waitingForCallback();
-}
-
 void setPS2leds(uint8_t caps, uint8_t num, uint8_t scroll)
 {
-  uint8_t tmpSREG = SREG;
-  uint16_t tempConv = 0;
-
-  waitForDataIdle();
-
-  cli();
-
   g_ps2keyboard.leds.bit.cap = caps & 0x01;
 
   g_ps2keyboard.leds.bit.num = num & 0x01;
 
   g_ps2keyboard.leds.bit.scroll = scroll & 0x01;
 
-  tempConv = dataToPacket(g_ps2keyboard.leds.packet);
+  sendCommand_noack(CMD_SET_LED);
 
-  copyPacketToBuffer(tempConv);
-
-  startTransmit();
-
-  SREG = tmpSREG;
-
-  waitingForCallback();
+  sendData(g_ps2keyboard.leds.packet);
 }
 
 uint8_t oddParityGen(uint16_t data)
@@ -596,37 +530,45 @@ void startTransmit()
   g_ps2.index++;
 }
 
+void getID(uint16_t ps2Data)
+{
+  static int shift = 0;
+  uint8_t convData = 0;
+
+  convData = convertToRaw(ps2Data);
+
+  g_ps2keyboard.id |= convData << (shift * 8);
+  g_ps2keyboard.callbackState = waiting;
+
+  shift++;
+
+  g_ps2keyboard.callbackState = (shift > 1 ? keyboard_id : waiting);
+
+  shift %= 2;
+}
+
 void checkKeyboardResponse(uint16_t ps2Data)
 {
   uint8_t convData = 0;
 
   convData = convertToRaw(ps2Data);
 
+  g_ps2.recvCallback = &extractData;
+
   switch(convData)
   {
-    case CMD_KEY_RDY:
-      g_ps2.recvCallback = &extractData;
+    case CMD_DEV_RDY:
       g_ps2keyboard.callbackState = ready_cmd;
       break;
     case CMD_RESEND:
-      g_ps2.recvCallback = &extractData;
       g_ps2keyboard.callbackState = resend_cmd;
       break;
     case CMD_ACK:
-      g_ps2.recvCallback = &extractData;
+      if(g_ps2keyboard.lastCMD == CMD_READ_ID)
+        g_ps2.recvCallback = &getID;
       g_ps2keyboard.callbackState = ack_cmd;
       break;
-    case KEYBOARD_ID1:
-      g_ps2keyboard.id |= convData;
-      g_ps2keyboard.callbackState = waiting;
-      break;
-    case KEYBOARD_ID2:
-      g_ps2keyboard.id |= convData << sizeof(uint8_t)*8;
-      g_ps2.recvCallback = &extractData;
-      g_ps2keyboard.callbackState = keyboard_id;
-      break;
     default:
-      g_ps2.recvCallback = &extractData;
       g_ps2keyboard.callbackState = no_cmd;
       break;
   }
