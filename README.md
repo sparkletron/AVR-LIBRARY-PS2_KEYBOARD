@@ -15,6 +15,9 @@ license: MIT
 ### Past
   - none
 
+### TODO
+  - code cleanup between this and PS2 mouse. Lots of duplicate code (move to PS2 base).
+
 ## Requirements
   - avr-gcc
   - avrlibc
@@ -40,20 +43,16 @@ void recvCallback(uint8_t recvBuffer);
 
 int main(void)
 {
-	DDRD = ~0;
+  initPS2keyboard(&recvCallback, &setPS2_PORTB_Device, &PORTB, PORTB0, PORTB1);
 
-	PORTD = 0;
-
-	initPS2keyboard(&recvCallback, &setPS2_PORTB_Device, &PORTB, PORTB0, PORTB1);
-
-	for(;;)
-	{
-		updatePS2leds();
-	}
+  for(;;)
+  {
+    updatePS2leds();
+  }
 }
 
 void recvCallback(uint8_t recvBuffer)
 {
-	PORTD = recvBuffer;
+  PORTD = recvBuffer;
 }
 ```
