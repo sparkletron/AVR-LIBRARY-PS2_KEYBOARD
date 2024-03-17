@@ -268,6 +268,8 @@ void resendPS2lastByte()
 void resetPS2keyboard()
 {
   sendCommand(CMD_RESET);
+
+  waitForDevReady();
 }
 
 void disablePS2keyboard()
@@ -381,10 +383,6 @@ void waitForDataIdle()
 
 void waitForDevReady()
 {
-  g_ps2keyboard.callbackState = waiting;
-
-  g_ps2.recvCallback = &checkKeyboardResponse;
-
   while(g_ps2keyboard.callbackState != ready_cmd);
 }
 
@@ -566,6 +564,8 @@ void checkKeyboardResponse(uint16_t ps2Data)
     case CMD_ACK:
       if(g_ps2keyboard.lastCMD == CMD_READ_ID)
         g_ps2.recvCallback = &getID;
+      if(g_ps2keyboard.lastCMD == CMD_RESET)
+        g_ps2.recvCallback = &checkKeyboardResponse;
       g_ps2keyboard.callbackState = ack_cmd;
       break;
     default:
