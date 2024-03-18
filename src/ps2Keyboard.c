@@ -87,10 +87,13 @@ struct s_ps2keyboard
 } g_ps2keyboard;
 
 //helper functions
+//convert scancode to define from scancodes header.
 uint8_t convertToDefine(uint8_t ps2data);
-void getID(uint16_t ps2Data);
 //set internal LED tracking and send LED state to keyboard.
 void setPS2leds(uint8_t caps, uint8_t num, uint8_t scroll);
+//callbacks
+//get the two byte id
+void getID(uint16_t ps2Data);
 //check the response to keyboard command sent and perform needed operations
 void checkKeyboardResponse(uint16_t ps2Data);
 //Default callback for recv that processes data and then hands it off to the user callback.
