@@ -31,7 +31,6 @@
  * IN THE SOFTWARE.
  ******************************************************************************/
 
-
 #include <avr/io.h>
 #include <stdlib.h>
 #include <string.h>
@@ -43,8 +42,6 @@
 #include "ps2scanCodes.h"
 
 volatile int toggle = 0;
-
-struct s_ps2 g_ps2;
 
 enum keyReleaseStates {no_release, release};
 
@@ -84,27 +81,29 @@ struct s_ps2keyboard
   uint16_t id;
 
   volatile enum keyReleaseStates keyReleaseState;
-} g_ps2keyboard;
+};
 
 //helper functions
 //convert scancode to define from scancodes header.
-uint8_t convertToDefine(uint8_t ps2data);
+uint8_t convertToDefine(struct s_ps2 *p_ps2keyboard, uint8_t ps2data);
 //set internal LED tracking and send LED state to keyboard.
-void setPS2leds(uint8_t caps, uint8_t num, uint8_t scroll);
+void setPS2leds(struct s_ps2 *p_ps2keyboard, uint8_t caps, uint8_t num, uint8_t scroll);
 //callbacks
 //get the two byte id
-void getID(uint16_t ps2Data);
+void getID(void *p_data, uint16_t ps2Data);
 //check the response to keyboard command sent and perform needed operations
-void checkKeyboardResponse(uint16_t ps2Data);
+void checkKeyboardResponse(void *p_data, uint16_t ps2Data);
 //Default callback for recv that processes data and then hands it off to the user callback.
-void extractData(uint16_t ps2data);
+void extractData(void *p_data, uint16_t ps2data);
 
-void initPS2keyboard(t_PS2userRecvCallback PS2recvCallback, void (*setPS2_PORT_Device)(struct s_ps2 *p_device), volatile uint8_t *p_port, uint8_t clkPin, uint8_t dataPin)
+void initPS2keyboard(struct s_ps2 *p_ps2keyboard, t_PS2userRecvCallback PS2recvCallback, void (*setPS2_PORT_Device)(struct s_ps2 *p_device), volatile uint8_t *p_port, uint8_t clkPin, uint8_t dataPin)
 {
   uint8_t tmpSREG = 0;
 
   tmpSREG = SREG;
   cli();
+
+  if(p_ps2keyboard == NULL) return;
 
   if(p_port == NULL) return;
 
@@ -112,58 +111,62 @@ void initPS2keyboard(t_PS2userRecvCallback PS2recvCallback, void (*setPS2_PORT_D
 
   if(setPS2_PORT_Device == NULL) return;
 
-  setPS2_PORT_Device(&g_ps2);
+  memset(p_ps2keyboard, 0, sizeof(struct s_ps2));
 
-  memset(&g_ps2keyboard, 0, sizeof(g_ps2keyboard));
+  p_ps2keyboard->p_device = malloc(sizeof(struct s_ps2keyboard));
 
-  memset(&g_ps2, 0, sizeof(g_ps2));
+  memset(p_ps2keyboard->p_device, 0, sizeof(struct s_ps2keyboard));
 
-  g_ps2.clkPin = clkPin;
-  g_ps2.dataPin = dataPin;
-  g_ps2.p_port = p_port;
-  g_ps2.lastAckState = ack;
-  g_ps2.dataState = idle;
-  g_ps2.userRecvCallback = PS2recvCallback;
-  g_ps2.recvCallback = NULL;
-  g_ps2.responseCallback = &checkKeyboardResponse;
-  g_ps2.callUserCallback = &extractData;
+  p_ps2keyboard->clkPin = clkPin;
+  p_ps2keyboard->dataPin = dataPin;
+  p_ps2keyboard->p_port = p_port;
+  p_ps2keyboard->lastAckState = ack;
+  p_ps2keyboard->dataState = idle;
+  p_ps2keyboard->userRecvCallback = PS2recvCallback;
+  p_ps2keyboard->recvCallback = NULL;
+  p_ps2keyboard->responseCallback = &checkKeyboardResponse;
+  p_ps2keyboard->callUserCallback = &extractData;
 
-  g_ps2keyboard.prevCapRelease    = release;
-  g_ps2keyboard.prevNumRelease    = release;
-  g_ps2keyboard.prevScrollRelease = release;
+  ((struct s_ps2keyboard *)(p_ps2keyboard->p_device))->prevCapRelease    = release;
+  ((struct s_ps2keyboard *)(p_ps2keyboard->p_device))->prevNumRelease    = release;
+  ((struct s_ps2keyboard *)(p_ps2keyboard->p_device))->prevScrollRelease = release;
 
-  *(g_ps2.p_port - 1) &= ~(1 << g_ps2.clkPin);
-  *(g_ps2.p_port - 1) &= ~(1 << g_ps2.dataPin);
+  *(p_ps2keyboard->p_port - 1) &= ~(1 << p_ps2keyboard->clkPin);
+  *(p_ps2keyboard->p_port - 1) &= ~(1 << p_ps2keyboard->dataPin);
 
-  if(g_ps2.p_port == &PORTB)
+  if(p_ps2keyboard->p_port == &PORTB)
   {
     PCICR |= 1 << PCIE0;
-    PCMSK0 |= 1 << g_ps2.clkPin;
+    PCMSK0 |= 1 << p_ps2keyboard->clkPin;
   }
-  else if(g_ps2.p_port == &PORTC)
+  else if(p_ps2keyboard->p_port == &PORTC)
   {
     PCICR |= 1 << PCIE1;
-    PCMSK1 |= 1 << g_ps2.clkPin;
+    PCMSK1 |= 1 << p_ps2keyboard->clkPin;
   }
   else
   {
     PCICR |= 1 << PCIE2;
-    PCMSK2 |= 1 << g_ps2.clkPin;
+    PCMSK2 |= 1 << p_ps2keyboard->clkPin;
   }
+
+  setPS2_PORT_Device(p_ps2keyboard);
 
   SREG = tmpSREG;
 
   sei();
 
   //initialize keyboard using PC init method
-  resetPS2keyboard();
+  resetPS2keyboard(p_ps2keyboard);
 
-  setPS2leds(0, 0, 0);
+  setPS2leds(p_ps2keyboard, 0, 0, 0);
 }
 
-char PS2defineToChar(uint8_t ps2data)
+char PS2defineToChar(struct s_ps2 *p_ps2keyboard, uint8_t ps2data)
 {
   uint8_t tmpSREG = 0;
+
+  if(p_ps2keyboard == NULL) return '\0';
 
   tmpSREG = SREG;
   cli();
@@ -178,7 +181,7 @@ char PS2defineToChar(uint8_t ps2data)
       {
         SREG = tmpSREG;
 
-        return (getPS2capsLockState() ? e_set2scanCodes[index].ascii - 32 : e_set2scanCodes[index].ascii);
+        return (getPS2capsLockState(p_ps2keyboard) ? e_set2scanCodes[index].ascii - 32 : e_set2scanCodes[index].ascii);
       }
 
       SREG = tmpSREG;
@@ -191,93 +194,93 @@ char PS2defineToChar(uint8_t ps2data)
   return e_set2scanCodes[index].ascii;
 }
 
-void updatePS2leds()
+void updatePS2leds(struct s_ps2 *p_ps2keyboard)
 {
-  waitForDataIdle(&g_ps2);
+  waitForDataIdle(p_ps2keyboard);
 
-  if(g_ps2keyboard.prevLEDS.packet != g_ps2keyboard.leds.packet)
+  if(((struct s_ps2keyboard *)(p_ps2keyboard->p_device))->prevLEDS.packet != ((struct s_ps2keyboard *)(p_ps2keyboard->p_device))->leds.packet)
   {
-    setPS2leds(getPS2capsLockState(), getPS2numLockState(), getPS2scrollLockState());
+    setPS2leds(p_ps2keyboard, getPS2capsLockState(p_ps2keyboard), getPS2numLockState(p_ps2keyboard), getPS2scrollLockState(p_ps2keyboard));
   }
 
-  g_ps2keyboard.prevLEDS.packet = g_ps2keyboard.leds.packet;
+  ((struct s_ps2keyboard *)(p_ps2keyboard->p_device))->prevLEDS.packet = ((struct s_ps2keyboard *)(p_ps2keyboard->p_device))->leds.packet;
 }
 
-uint8_t getPS2keyReleased()
+uint8_t getPS2keyReleased(struct s_ps2 *p_ps2keyboard)
 {
-  return (g_ps2keyboard.keyReleaseState == release);
+  return (((struct s_ps2keyboard *)(p_ps2keyboard->p_device))->keyReleaseState == release);
 }
 
-uint16_t getPS2keyboardID()
+uint16_t getPS2keyboardID(struct s_ps2 *p_ps2keyboard)
 {
-  return g_ps2keyboard.id;
+  return ((struct s_ps2keyboard *)(p_ps2keyboard->p_device))->id;
 }
 
-uint8_t getPS2capsLockState()
+uint8_t getPS2capsLockState(struct s_ps2 *p_ps2keyboard)
 {
-  return g_ps2keyboard.leds.bit.cap;
+  return ((struct s_ps2keyboard *)(p_ps2keyboard->p_device))->leds.bit.cap;
 }
 
-uint8_t getPS2numLockState()
+uint8_t getPS2numLockState(struct s_ps2 *p_ps2keyboard)
 {
-  return g_ps2keyboard.leds.bit.num;
+  return ((struct s_ps2keyboard *)(p_ps2keyboard->p_device))->leds.bit.num;
 }
 
-uint8_t getPS2scrollLockState()
+uint8_t getPS2scrollLockState(struct s_ps2 *p_ps2keyboard)
 {
-  return g_ps2keyboard.leds.bit.scroll;
+  return ((struct s_ps2keyboard *)(p_ps2keyboard->p_device))->leds.bit.scroll;
 }
 
-void resendPS2lastByte()
+void resendPS2lastByte(struct s_ps2 *p_ps2keyboard)
 {
-  sendCommand(&g_ps2, CMD_RESEND);
+  sendCommand(p_ps2keyboard, CMD_RESEND);
 }
 
-void resetPS2keyboard()
+void resetPS2keyboard(struct s_ps2 *p_ps2keyboard)
 {
-  sendCommand(&g_ps2, CMD_RESET);
+  sendCommand(p_ps2keyboard, CMD_RESET);
 
-  waitForDevReady(&g_ps2);
+  waitForDevReady(p_ps2keyboard);
 }
 
-void disablePS2keyboard()
+void disablePS2keyboard(struct s_ps2 *p_ps2keyboard)
 {
-  sendCommand(&g_ps2, CMD_DISABLE);
+  sendCommand(p_ps2keyboard, CMD_DISABLE);
 }
 
-void enablePS2keyaboard()
+void enablePS2keyaboard(struct s_ps2 *p_ps2keyboard)
 {
-  sendCommand(&g_ps2, CMD_ENABLE);
+  sendCommand(p_ps2keyboard, CMD_ENABLE);
 }
 
-void setPS2default()
+void setPS2default(struct s_ps2 *p_ps2keyboard)
 {
-  sendCommand(&g_ps2, CMD_DEFAULT);
+  sendCommand(p_ps2keyboard, CMD_DEFAULT);
 }
 
 //broken? Need to check for ACKs
-void setPS2typmaticRateDelay(uint8_t delay, uint8_t rate)
+void setPS2typmaticRateDelay(struct s_ps2 *p_ps2keyboard, uint8_t delay, uint8_t rate)
 {
-  g_ps2keyboard.typematic.param.rate = (rate <= MAX_REPEAT_RATE ? rate : DEFAULT_RATE);
+  ((struct s_ps2keyboard *)(p_ps2keyboard->p_device))->typematic.param.rate = (rate <= MAX_REPEAT_RATE ? rate : DEFAULT_RATE);
 
-  g_ps2keyboard.typematic.param.delay = (delay <= MAX_DELAY ? delay : DEFAULT_DELAY);
+  ((struct s_ps2keyboard *)(p_ps2keyboard->p_device))->typematic.param.delay = (delay <= MAX_DELAY ? delay : DEFAULT_DELAY);
 
-  sendCommand(&g_ps2, CMD_SET_RATE);
+  sendCommand(p_ps2keyboard, CMD_SET_RATE);
 
-  sendData(&g_ps2, g_ps2keyboard.typematic.packet);
+  sendData(p_ps2keyboard, ((struct s_ps2keyboard *)(p_ps2keyboard->p_device))->typematic.packet);
 }
 
-void sendPS2readIDcmd()
+void sendPS2readIDcmd(struct s_ps2 *p_ps2keyboard)
 {
-  g_ps2keyboard.id = 0;
+  ((struct s_ps2keyboard *)(p_ps2keyboard->p_device))->id = 0;
 
-  sendCommand(&g_ps2, CMD_READ_ID);
+  sendCommand(p_ps2keyboard, CMD_READ_ID);
 
-  waitForDevID(&g_ps2);
+  waitForDevID(p_ps2keyboard);
 }
 
 //helper functions
-uint8_t convertToDefine(uint8_t ps2data)
+uint8_t convertToDefine(struct s_ps2 *p_ps2keyboard, uint8_t ps2data)
 {
   int index = 0;
   static int shift = 0;
@@ -291,7 +294,7 @@ uint8_t convertToDefine(uint8_t ps2data)
     {
       buffer = 0;
       shift = 0;
-      g_ps2keyboard.keyReleaseState = no_release;
+      ((struct s_ps2keyboard *)(p_ps2keyboard->p_device))->keyReleaseState = no_release;
       return e_set2scanCodes[index].defineCode;
     }
 
@@ -299,7 +302,7 @@ uint8_t convertToDefine(uint8_t ps2data)
     {
       buffer = 0;
       shift = 0;
-      g_ps2keyboard.keyReleaseState = release;
+      ((struct s_ps2keyboard *)(p_ps2keyboard->p_device))->keyReleaseState = release;
       return e_set2scanCodes[index].defineCode;
     }
   }
@@ -314,109 +317,126 @@ uint8_t convertToDefine(uint8_t ps2data)
     buffer = 0;
   }
 
-  g_ps2keyboard.keyReleaseState = no_release;
+  ((struct s_ps2keyboard *)(p_ps2keyboard->p_device))->keyReleaseState = no_release;
 
   return 0;
 }
 
 
-void setPS2leds(uint8_t caps, uint8_t num, uint8_t scroll)
+void setPS2leds(struct s_ps2 *p_ps2keyboard, uint8_t caps, uint8_t num, uint8_t scroll)
 {
-  g_ps2keyboard.leds.bit.cap = caps & 0x01;
+  ((struct s_ps2keyboard *)(p_ps2keyboard->p_device))->leds.bit.cap = caps & 0x01;
 
-  g_ps2keyboard.leds.bit.num = num & 0x01;
+  ((struct s_ps2keyboard *)(p_ps2keyboard->p_device))->leds.bit.num = num & 0x01;
 
-  g_ps2keyboard.leds.bit.scroll = scroll & 0x01;
+  ((struct s_ps2keyboard *)(p_ps2keyboard->p_device))->leds.bit.scroll = scroll & 0x01;
 
-  sendCommand_noack(&g_ps2, CMD_SET_LED);
+  sendCommand_noack(p_ps2keyboard, CMD_SET_LED);
 
-  sendData(&g_ps2, g_ps2keyboard.leds.packet);
+  sendData(p_ps2keyboard, ((struct s_ps2keyboard *)(p_ps2keyboard->p_device))->leds.packet);
 }
 
 
-void getID(uint16_t ps2Data)
+void getID(void *p_data, uint16_t ps2Data)
 {
   static int shift = 0;
   uint8_t convData = 0;
 
+  struct s_ps2 *p_ps2 = NULL;
+
+  if(p_data == NULL) return;
+
+  p_ps2 = (struct s_ps2 *)p_data;
+
   convData = convertToRaw(ps2Data);
 
-  g_ps2keyboard.id |= convData << (shift * 8);
-  g_ps2.callbackState = waiting;
+  ((struct s_ps2keyboard *)(p_ps2->p_device))->id |= convData << (shift * 8);
 
   shift++;
 
-  g_ps2.callbackState = (shift > 1 ? dev_id : waiting);
+  p_ps2->callbackState = (shift > 1 ? dev_id : waiting);
 
   shift %= 2;
 }
 
-void checkKeyboardResponse(uint16_t ps2Data)
+void checkKeyboardResponse(void *p_data, uint16_t ps2Data)
 {
   uint8_t convData = 0;
 
+  struct s_ps2 *p_ps2 = NULL;
+
+  if(p_data == NULL) return;
+
+  p_ps2 = (struct s_ps2 *)p_data;
+
   convData = convertToRaw(ps2Data);
 
-  g_ps2.recvCallback = &extractData;
+  p_ps2->recvCallback = &extractData;
 
   switch(convData)
   {
     case CMD_DEV_RDY:
-      g_ps2.callbackState = ready_cmd;
+      p_ps2->callbackState = ready_cmd;
       break;
     case CMD_RESEND:
-      g_ps2.callbackState = resend_cmd;
+      p_ps2->callbackState = resend_cmd;
       break;
     case CMD_ACK:
-      if(g_ps2.lastCMD == CMD_READ_ID)
-        g_ps2.recvCallback = &getID;
-      if(g_ps2.lastCMD == CMD_RESET)
-        g_ps2.recvCallback = &checkKeyboardResponse;
-      g_ps2.callbackState = ack_cmd;
+      if(p_ps2->lastCMD == CMD_READ_ID)
+        p_ps2->recvCallback = &getID;
+      if(p_ps2->lastCMD == CMD_RESET)
+        p_ps2->recvCallback = &checkKeyboardResponse;
+      p_ps2->callbackState = ack_cmd;
       break;
     default:
-      g_ps2.callbackState = no_cmd;
+      p_ps2->callbackState = no_cmd;
       break;
   }
 }
 
-void extractData(uint16_t ps2data)
+void extractData(void *p_data, uint16_t ps2data)
 {
   uint8_t rawPS2data = 0;
   uint8_t definePS2data = 0;
 
+  struct s_ps2 *p_ps2 = NULL;
+
+  if(p_data == NULL) return;
+
+  p_ps2 = (struct s_ps2 *)p_data;
+
   rawPS2data = convertToRaw(ps2data);
 
-  definePS2data = convertToDefine(rawPS2data);
+  definePS2data = convertToDefine(p_ps2, rawPS2data);
 
   switch(definePS2data)
   {
     case KEYCODE_CAPS:
-      if(!getPS2keyReleased() && (g_ps2keyboard.prevCapRelease == release))
+      if(!getPS2keyReleased(p_ps2) && (((struct s_ps2keyboard *)(p_ps2->p_device))->prevCapRelease == release))
       {
-        g_ps2keyboard.leds.bit.cap = ~g_ps2keyboard.leds.bit.cap;
+        ((struct s_ps2keyboard *)(p_ps2->p_device))->leds.bit.cap = ~((struct s_ps2keyboard *)(p_ps2->p_device))->leds.bit.cap;
       }
 
-      g_ps2keyboard.prevCapRelease = g_ps2keyboard.keyReleaseState;
+      ((struct s_ps2keyboard *)(p_ps2->p_device))->prevCapRelease = ((struct s_ps2keyboard *)(p_ps2->p_device))->keyReleaseState;
       break;
     case KEYCODE_NUM:
-      if(!getPS2keyReleased() && (g_ps2keyboard.prevNumRelease == release))
+      if(!getPS2keyReleased(p_ps2) && (((struct s_ps2keyboard *)(p_ps2->p_device))->prevNumRelease == release))
       {
-        g_ps2keyboard.leds.bit.num = ~g_ps2keyboard.leds.bit.num;
+        ((struct s_ps2keyboard *)(p_ps2->p_device))->leds.bit.num = ~((struct s_ps2keyboard *)(p_ps2->p_device))->leds.bit.num;
       }
 
-      g_ps2keyboard.prevNumRelease = g_ps2keyboard.keyReleaseState;
+      ((struct s_ps2keyboard *)(p_ps2->p_device))->prevNumRelease = ((struct s_ps2keyboard *)(p_ps2->p_device))->keyReleaseState;
       break;
     case KEYCODE_SCROLL:
-      if(!getPS2keyReleased() && (g_ps2keyboard.prevScrollRelease == release))
+      if(!getPS2keyReleased(p_ps2) && (((struct s_ps2keyboard *)(p_ps2->p_device))->prevScrollRelease == release))
       {
-        g_ps2keyboard.leds.bit.scroll = ~g_ps2keyboard.leds.bit.scroll;
+        ((struct s_ps2keyboard *)(p_ps2->p_device))->leds.bit.scroll = ~((struct s_ps2keyboard *)(p_ps2->p_device))->leds.bit.scroll;
       }
 
-      g_ps2keyboard.prevScrollRelease = g_ps2keyboard.keyReleaseState;
+      ((struct s_ps2keyboard *)(p_ps2->p_device))->prevScrollRelease = ((struct s_ps2keyboard *)(p_ps2->p_device))->keyReleaseState;
       break;
     default:
-      g_ps2.userRecvCallback(definePS2data);
+      p_ps2->userRecvCallback(definePS2data);
       break;
   }
 }
