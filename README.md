@@ -40,7 +40,7 @@ void recvCallback(uint8_t recvBuffer);
 
 int main(void)
 {
-  struct ps2 ps2;
+  struct s_ps2 ps2;
 
   DDRD = ~0;
 
